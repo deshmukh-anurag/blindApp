@@ -5,7 +5,9 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.AspectRatio
@@ -16,9 +18,14 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.rahul.yolov8tflite.Constants.LABELS_PATH
 import com.rahul.yolov8tflite.Constants.MODEL_PATH
 import com.rahul.yolov8tflite.databinding.ActivityMainBinding
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -29,11 +36,19 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     @Volatile
     private var isDetecting = false
 
+    @Volatile
+    private var lastFrameForOcr: Bitmap? = null
+
     private var preview: Preview? = null
     private var imageAnalyzer: ImageAnalysis? = null
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var detector: Detector? = null
+
+    private lateinit var textRecognizer: TextRecognizer
+    private var tts: TextToSpeech? = null
+    @Volatile
+    private var isTtsReady: Boolean = false
 
     private lateinit var cameraExecutor: ExecutorService
 
@@ -41,6 +56,16 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val result = tts?.setLanguage(Locale.getDefault())
+                isTtsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+            } else {
+                isTtsReady = false
+            }
+        }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -72,6 +97,36 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                     binding.overlay.clear()
                 }
             }
+        }
+
+        binding.readTextButton.setOnClickListener {
+            val bitmap = lastFrameForOcr
+            if (bitmap == null) {
+                Toast.makeText(this, "No frame available yet", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val image = InputImage.fromBitmap(bitmap, 0)
+            textRecognizer.process(image)
+                .addOnSuccessListener { visionText ->
+                    val text = visionText.text
+                    if (text.isBlank()) {
+                        Toast.makeText(this, "No text detected", Toast.LENGTH_SHORT).show()
+                    } else {
+                        if (tts == null || !isTtsReady) {
+                            Toast.makeText(this, "Text-to-speech is initializing, please wait...", Toast.LENGTH_SHORT).show()
+                        } else {
+                            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "OCR_TEXT")
+                        }
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Toast.makeText(
+                        this,
+                        "Text recognition failed: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
         }
     }
 
@@ -106,11 +161,6 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             .build()
 
         imageAnalyzer?.setAnalyzer(cameraExecutor) { imageProxy ->
-            if (!isDetecting) {
-                imageProxy.close()
-                return@setAnalyzer
-            }
-
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
             val width = imageProxy.width
             val height = imageProxy.height
@@ -129,7 +179,11 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             }
 
             val rotatedBitmap = Bitmap.createBitmap(bitmapBuffer, 0, 0, width, height, matrix, true)
-            detector?.detect(rotatedBitmap)
+            lastFrameForOcr = rotatedBitmap
+
+            if (isDetecting) {
+                detector?.detect(rotatedBitmap)
+            }
         }
 
         cameraProvider.unbindAll()
@@ -160,6 +214,11 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     override fun onDestroy() {
         super.onDestroy()
         detector?.close()
+        if (::textRecognizer.isInitialized) {
+            textRecognizer.close()
+        }
+        tts?.stop()
+        tts?.shutdown()
         cameraExecutor.shutdown()
     }
 
@@ -188,6 +247,12 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
     override fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {
         runOnUiThread {
+            if (!isDetecting) {
+                binding.inferenceTime.text = ""
+                binding.overlay.clear()
+                return@runOnUiThread
+            }
+
             binding.inferenceTime.text = "${inferenceTime}ms"
             binding.overlay.apply {
                 setResults(boundingBoxes)

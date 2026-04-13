@@ -50,6 +50,17 @@
         android:paddingVertical="4dp"
         app:layout_constraintBottom_toBottomOf="parent">
 
+        <Button
+            android:id="@+id/readTextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Read Text"
+            android:background="@color/gray"
+            android:textColor="@color/white"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent" />
+
         <ToggleButton
             android:id="@+id/detectToggle"
             android:layout_width="wrap_content"
@@ -58,10 +69,10 @@
             android:textColor="@color/white"
             android:textOff="@string/detect_objects"
             android:textOn="@string/stop_detecting"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toEndOf="@id/readTextButton"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintVertical_bias="0.5" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
