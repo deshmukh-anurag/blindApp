@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">YOLOv8 Detector</string>
+    <string name="detect_objects">Detect Objects</string>
+    <string name="stop_detecting">Stop Detecting</string>
+</resources>
