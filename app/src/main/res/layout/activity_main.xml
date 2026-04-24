@@ -52,28 +52,44 @@
 
         <Button
             android:id="@+id/readTextButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:text="Read Text"
             android:background="@color/gray"
             android:textColor="@color/white"
             app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/detectToggle"
             app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintHorizontal_weight="1" />
 
         <ToggleButton
             android:id="@+id/detectToggle"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:background="@color/gray"
             android:textColor="@color/white"
             android:textOff="@string/detect_objects"
             android:textOn="@string/stop_detecting"
             app:layout_constraintStart_toEndOf="@id/readTextButton"
+            app:layout_constraintEnd_toStartOf="@id/walkingModeToggle"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintHorizontal_weight="1"
+            app:layout_constraintVertical_bias="0.5" />
+
+        <ToggleButton
+            android:id="@+id/walkingModeToggle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Walking Mode"
+            android:background="@color/gray"
+            android:textColor="@color/white"
+            app:layout_constraintStart_toEndOf="@id/detectToggle"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintVertical_bias="0.5" />
+            app:layout_constraintHorizontal_weight="1" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

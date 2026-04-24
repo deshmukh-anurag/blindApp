@@ -22,8 +22,10 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.rahul.yolov8tflite.Constants.DEPTH_MODEL_PATH
 import com.rahul.yolov8tflite.Constants.LABELS_PATH
 import com.rahul.yolov8tflite.Constants.MODEL_PATH
+import com.rahul.yolov8tflite.Constants.SEGMENTATION_MODEL_PATH
 import com.rahul.yolov8tflite.databinding.ActivityMainBinding
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -39,11 +41,36 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     @Volatile
     private var lastFrameForOcr: Bitmap? = null
 
+    @Volatile
+    private var isWalkingMode: Boolean = false
+
+    @Volatile
+    private var lastGuidanceTime: Long = 0L
+
+    @Volatile
+    private var lastGuidanceText: String? = null
+
     private var preview: Preview? = null
     private var imageAnalyzer: ImageAnalysis? = null
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var detector: Detector? = null
+    private var depthEstimator: DepthEstimator? = null
+    private var segmentor: Segmentor? = null
+
+    @Volatile
+    private var lastDepthMap: FloatArray? = null
+    @Volatile
+    private var depthWidth: Int = 0
+    @Volatile
+    private var depthHeight: Int = 0
+    @Volatile
+    private var lastDepthTime: Long = 0L
+
+    @Volatile
+    private var lastSegMap: Array<IntArray>? = null
+    @Volatile
+    private var lastSegTime: Long = 0L
 
     private lateinit var textRecognizer: TextRecognizer
     private var tts: TextToSpeech? = null
@@ -71,6 +98,8 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         cameraExecutor.execute {
             detector = Detector(baseContext, MODEL_PATH, LABELS_PATH, this)
+            depthEstimator = DepthEstimator(baseContext, DEPTH_MODEL_PATH)
+            segmentor = Segmentor(baseContext, SEGMENTATION_MODEL_PATH)
         }
 
         if (allPermissionsGranted()) {
@@ -95,6 +124,26 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 if (!checked) {
                     binding.inferenceTime.text = ""
                     binding.overlay.clear()
+                }
+            }
+        }
+
+        binding.walkingModeToggle.apply {
+            isChecked = false
+            setBackgroundColor(ContextCompat.getColor(baseContext, R.color.gray))
+
+            setOnCheckedChangeListener { _, checked ->
+                isWalkingMode = checked
+                val colorRes = if (checked) R.color.red else R.color.gray
+                setBackgroundColor(ContextCompat.getColor(baseContext, colorRes))
+
+                if (checked && !binding.detectToggle.isChecked) {
+                    binding.detectToggle.isChecked = true
+                }
+
+                if (!checked) {
+                    lastGuidanceText = null
+                    lastGuidanceTime = 0L
                 }
             }
         }
@@ -184,6 +233,25 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             if (isDetecting) {
                 detector?.detect(rotatedBitmap)
             }
+
+            if (isWalkingMode) {
+                val now = System.currentTimeMillis()
+                if (now - lastDepthTime > 1000L) {
+                    lastDepthTime = now
+                    depthEstimator?.estimateDepth(rotatedBitmap)?.let { result ->
+                        lastDepthMap = result.data
+                        depthWidth = result.width
+                        depthHeight = result.height
+                    }
+                }
+
+                if (now - lastSegTime > 1000L) {
+                    lastSegTime = now
+                    segmentor?.segment(rotatedBitmap)?.let { seg ->
+                        lastSegMap = seg
+                    }
+                }
+            }
         }
 
         cameraProvider.unbindAll()
@@ -214,6 +282,8 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     override fun onDestroy() {
         super.onDestroy()
         detector?.close()
+        depthEstimator?.close()
+        segmentor?.close()
         if (::textRecognizer.isInitialized) {
             textRecognizer.close()
         }
@@ -258,6 +328,215 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 setResults(boundingBoxes)
                 invalidate()
             }
+
+            if (isWalkingMode) {
+                provideWalkingGuidance(boundingBoxes)
+            }
         }
+    }
+
+    private fun provideWalkingGuidance(boundingBoxes: List<BoundingBox>) {
+        if (tts == null || !isTtsReady) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastGuidanceTime < 1000L) return
+
+        lastGuidanceTime = now
+
+        val depth = lastDepthMap
+        val w = depthWidth
+        val h = depthHeight
+        val seg = lastSegMap
+
+        val depthThresholdClose = 0.6f
+        val depthThresholdVeryClose = 0.8f
+
+        var guidance: String? = null
+
+        if (depth != null && w > 0 && h > 0) {
+            // 1. Obstacle detection in center
+            val center = sampleDepth(depth, w, h, 0.5f, 0.5f)
+            if (center > depthThresholdVeryClose) {
+                guidance = "Obstacle very close. Stop."
+            }
+
+            // 5. Wall detection – wide area in front
+            if (guidance == null) {
+                val midY = ((h - 1) * 0.5f).toInt()
+                val startX = ((w - 1) * 0.2f).toInt()
+                val endX = ((w - 1) * 0.8f).toInt()
+                var count = 0
+                for (x in startX..endX) {
+                    val idx = midY * w + x
+                    if (idx in depth.indices && depth[idx] > depthThresholdClose) count++
+                }
+                if (count > (endX - startX + 1) * 0.6f) {
+                    guidance = "Wall ahead. Turn slightly left or right."
+                }
+            }
+
+            // 4. Danger detection – object + depth
+            if (guidance == null) {
+                val centerBoxes = boundingBoxes.filter { it.cx in 0.4f..0.6f }
+                val closest = centerBoxes.maxByOrNull { it.h }
+                if (closest != null && center > depthThresholdClose) {
+                    val label = closest.clsName
+                    guidance = when {
+                        label.contains("car", true) || label.contains("vehicle", true) ->
+                            "Warning, vehicle very near in front."
+                        label.contains("person", true) || label.contains("human", true) ->
+                            "Person very near in front."
+                        else ->
+                            "Warning, $label very close in front."
+                    }
+                }
+            }
+
+            // Segmentation-based person / obstacle hints (DeepLab)
+            if (guidance == null && seg != null) {
+                val centerClass = sampleSeg(seg, 0.5f, 0.5f)
+                if (centerClass == 15) {
+                    guidance = "Person ahead."
+                }
+            }
+
+            // 2 & 3. Smart navigation + free path detection (depth + segmentation)
+            if (guidance == null) {
+                val leftDepth = sampleDepth(depth, w, h, 0.25f, 0.5f)
+                val rightDepth = sampleDepth(depth, w, h, 0.75f, 0.5f)
+
+                val bottomY = ((h - 1) * 0.8f).toInt()
+                val pathStartX = ((w - 1) * 0.4f).toInt()
+                val pathEndX = ((w - 1) * 0.6f).toInt()
+                var sum = 0f
+                var n = 0
+                for (x in pathStartX..pathEndX) {
+                    val idx = bottomY * w + x
+                    if (idx in depth.indices) {
+                        sum += depth[idx]
+                        n++
+                    }
+                }
+                val avg = if (n > 0) sum / n else 0f
+
+                // Segmentation: check bottom band for obstacles (non-background)
+                var segObstacle = false
+                var segMoveLeft = false
+                var segMoveRight = false
+                if (seg != null) {
+                    val segH = seg.size
+                    val segW = if (segH > 0) seg[0].size else 0
+                    if (segW > 0 && segH > 0) {
+                        val segBottomY = (0.85f * (segH - 1)).toInt()
+                        val segStartX = (0.35f * (segW - 1)).toInt()
+                        val segEndX = (0.65f * (segW - 1)).toInt()
+                        for (x in segStartX..segEndX) {
+                            if (seg[segBottomY][x] != 0) {
+                                segObstacle = true
+                                break
+                            }
+                        }
+
+                        val segLeft = seg[(0.8f * (segH - 1)).toInt()][(0.2f * (segW - 1)).toInt()]
+                        val segRight = seg[(0.8f * (segH - 1)).toInt()][(0.8f * (segW - 1)).toInt()]
+                        if (segLeft != 0 && segRight == 0) segMoveRight = true
+                        if (segRight != 0 && segLeft == 0) segMoveLeft = true
+                    }
+                }
+
+                guidance = when {
+                    center > depthThresholdClose -> {
+                        when {
+                            segMoveLeft -> "Move left."
+                            segMoveRight -> "Move right."
+                            else -> if (leftDepth < rightDepth) "Move left." else "Move right."
+                        }
+                    }
+                    avg > depthThresholdClose || segObstacle -> {
+                        "Obstacle ahead. Path blocked."
+                    }
+                    else -> {
+                        "Path clear. You can go forward."
+                    }
+                }
+            }
+        } else {
+            // Fallback: old bounding-box-only logic
+            if (boundingBoxes.isEmpty()) {
+                guidance = "Path looks clear. You can walk forward."
+            } else {
+                val centerLeft = 0.33f
+                val centerRight = 0.67f
+
+                val wideBlocking = boundingBoxes.filter { box ->
+                    val width = box.x2 - box.x1
+                    val height = box.y2 - box.y1
+                    width > 0.8f && height > 0.6f
+                }
+
+                val centerBlocking = boundingBoxes.filter { box ->
+                    box.cx in centerLeft..centerRight
+                }
+
+                guidance = when {
+                    wideBlocking.isNotEmpty() -> {
+                        val obj = wideBlocking.maxBy { it.h }
+                        "Stop. ${obj.clsName} is blocking the way. Turn slightly left or right to find a free path."
+                    }
+                    centerBlocking.isNotEmpty() -> {
+                        val obj = centerBlocking.maxBy { it.h }
+                        val direction = if (obj.cx < 0.5f) "right" else "left"
+                        "Stop. ${obj.clsName} ahead in front. Move a little $direction."
+                    }
+                    else -> {
+                        val centerLeftB = 0.33f
+                        val centerRightB = 0.67f
+                        val leftObjects = boundingBoxes.filter { it.cx < centerLeftB }
+                        val rightObjects = boundingBoxes.filter { it.cx > centerRightB }
+
+                        when {
+                            leftObjects.isNotEmpty() && rightObjects.isNotEmpty() ->
+                                "Objects on both sides. Move carefully straight ahead."
+                            leftObjects.isNotEmpty() ->
+                                "Clear on the right. You can move slightly right."
+                            rightObjects.isNotEmpty() ->
+                                "Clear on the left. You can move slightly left."
+                            else ->
+                                "Path looks clear. You can walk forward."
+                        }
+                    }
+                }
+            }
+        }
+
+        guidance?.let { speakGuidance(it) }
+    }
+
+    private fun sampleDepth(depth: FloatArray, width: Int, height: Int, xNorm: Float, yNorm: Float): Float {
+        if (width <= 0 || height <= 0) return 0f
+        val xn = xNorm.coerceIn(0f, 1f)
+        val yn = yNorm.coerceIn(0f, 1f)
+        val x = (xn * (width - 1)).toInt()
+        val y = (yn * (height - 1)).toInt()
+        val idx = y * width + x
+        return if (idx in depth.indices) depth[idx] else 0f
+    }
+
+    private fun sampleSeg(seg: Array<IntArray>, xNorm: Float, yNorm: Float): Int {
+        val h = seg.size
+        if (h == 0) return 0
+        val w = seg[0].size
+        if (w == 0) return 0
+        val xn = xNorm.coerceIn(0f, 1f)
+        val yn = yNorm.coerceIn(0f, 1f)
+        val x = (xn * (w - 1)).toInt()
+        val y = (yn * (h - 1)).toInt()
+        return seg[y][x]
+    }
+
+    private fun speakGuidance(text: String) {
+        if (text == lastGuidanceText) return
+        lastGuidanceText = text
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "WALK_GUIDE")
     }
 }
