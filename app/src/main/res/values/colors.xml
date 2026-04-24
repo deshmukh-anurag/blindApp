@@ -2,8 +2,31 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="bounding_box_color">#234567</color>
-    <color name="gray">#999</color>
-    <color name="orange">#F93</color>
+    <color name="gray">#999999</color>
+
+    <color name="bg_dark">#0A0E1A</color>
+    <color name="bg_surface">#141824</color>
+    <color name="bg_card">#1A2035</color>
+    <color name="bg_button">#1E2A42</color>
+    <color name="bg_button_active">#2D5BE3</color>
+
+    <color name="accent_blue">#4A90E2</color>
+    <color name="accent_green">#3DDC84</color>
+    <color name="accent_orange">#FF9800</color>
+    <color name="accent_red">#F44336</color>
+    <color name="accent_teal">#00BCD4</color>
+
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#8A9BB5</color>
+    <color name="text_hint">#4A5568</color>
+
+    <color name="status_safe">#3DDC84</color>
+    <color name="status_caution">#FF9800</color>
+    <color name="status_danger">#F44336</color>
+    <color name="status_idle">#4A5568</color>
+
+    <color name="bounding_box_color">#4A90E2</color>
+
+    <color name="orange">#FF9933</color>
     <color name="red">#F44336</color>
 </resources>

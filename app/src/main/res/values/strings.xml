@@ -1,5 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">YOLOv8 Detector</string>
-    <string name="detect_objects">Detect Objects</string>
-    <string name="stop_detecting">Stop Detecting</string>
+    <string name="app_name">Vision AI</string>
+
+    <string name="read_text">Read Text</string>
+    <string name="detect_objects">Detect</string>
+    <string name="stop_detecting">Stop</string>
+    <string name="walking_mode">Navigate</string>
+
+    <string name="select_mode">Choose a mode to begin</string>
+    <string name="status_idle">Tap a mode below to start</string>
+    <string name="status_detecting">Detecting objects in scene…</string>
+    <string name="status_walking">Navigation mode active — guidance is spoken</string>
+    <string name="status_reading">Scanning for text…</string>
+
+    <string name="no_frame">No camera frame available yet</string>
+    <string name="no_text_found">No text detected in frame</string>
+    <string name="tts_not_ready">Voice assistant is initializing…</string>
 </resources>
