@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+/app/src/main/assets/deeplabv3_257_mv_gpu.tflite
+/app/src/main/assets/deepth.tflite
+/app/src/main/assets/model.tflite
+/app/src/main/assets/labels.txt
